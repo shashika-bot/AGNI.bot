@@ -5,9 +5,7 @@ const path = require('path');
 
 // temp folder auto-create
 const tempDir = path.join(__dirname, '../temp');
-if (!fs.existsSync(tempDir)) {
-  fs.mkdirSync(tempDir);
-}
+if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
 
 cmd({
   pattern: "ytmp3",
@@ -18,26 +16,25 @@ cmd({
 },
 async (conn, mek, m, { from, q, reply }) => {
   try {
-    if (!q) {
-      return reply("❌ Please provide a YouTube URL.\n\nExample: *.ytmp3 https://youtu.be/dQw4w9WgXcQ*");
-    }
+    if (!q) return reply("❌ Please provide a YouTube URL.\nExample: *.ytmp3 https://youtu.be/dQw4w9WgXcQ*");
 
-    // check video info
+    // get video info
     const info = await ytdl.getInfo(q);
     const title = info.videoDetails.title;
     const views = info.videoDetails.viewCount;
     const author = info.videoDetails.author.name;
     const length = new Date(info.videoDetails.lengthSeconds * 1000).toISOString().substr(11, 8);
-    const thumb = info.videoDetails.thumbnails[info.videoDetails.thumbnails.length - 1].url;
+    const thumb = info.videoDetails.thumbnails.pop().url;
 
     // file path
     const filePath = path.join(tempDir, `${Date.now()}.mp3`);
 
-    // download audio
-    const stream = ytdl(q, { filter: 'audioonly', quality: 'highestaudio' })
+    // download audio (low size → avoid timeout)
+    const stream = ytdl(q, { filter: 'audioonly', quality: 'lowestaudio' })
       .pipe(fs.createWriteStream(filePath));
 
     stream.on("finish", async () => {
+
       // caption like your style
       const caption = `
  /)  /)  ~ ┏━━━━━━━━━━━━━━━━━┓
@@ -55,15 +52,12 @@ async (conn, mek, m, { from, q, reply }) => {
 b ⇄   ◃◃   ⅠⅠ   ▹▹   ↻
       `;
 
-      // send thumb + caption
-      await conn.sendMessage(from, {
-        image: { url: thumb },
-        caption: caption
-      }, { quoted: mek });
+      // send thumbnail + caption
+      await conn.sendMessage(from, { image: { url: thumb }, caption: caption }, { quoted: mek });
 
-      // send audio file
+      // send mp3 as document (avoid fs.readFileSync to reduce memory)
       await conn.sendMessage(from, {
-        document: fs.readFileSync(filePath),
+        document: { url: filePath },
         mimetype: "audio/mpeg",
         fileName: `${title}.mp3`,
         caption: "Shashika"
@@ -73,9 +67,7 @@ b ⇄   ◃◃   ⅠⅠ   ▹▹   ↻
       fs.unlinkSync(filePath);
 
       // react success
-      await conn.sendMessage(from, {
-        react: { text: '✅', key: mek.key }
-      });
+      await conn.sendMessage(from, { react: { text: '✅', key: mek.key } });
     });
 
   } catch (e) {
