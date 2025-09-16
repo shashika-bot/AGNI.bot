@@ -1,77 +1,86 @@
-const { cmd } = require('../command');
-const ytdl = require('ytdl-core');
-const fs = require('fs');
-const path = require('path');
+const {cmd} = require('../command')
+const ytdl = require("ytdl-core")
+const yts = require("yt-search")
+const fs = require("fs")
 
-// temp folder auto-create
-const tempDir = path.join(__dirname, '../temp');
-if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
+// Temporary memory to keep search results
+let songSearchCache = {}
 
 cmd({
-  pattern: "ytmp3",
-  category: "downloader",
-  react: "🎵",
-  desc: "Download YouTube audio as MP3",
-  filename: __filename
+    pattern: "song",
+    desc: "Search and download songs.",
+    category: "download",
+    filename: __filename
 },
-async (conn, mek, m, { from, q, reply }) => {
-  try {
-    if (!q) return reply("❌ Please provide a YouTube URL.\nExample: *.ytmp3 https://youtu.be/dQw4w9WgXcQ*");
+async(conn, mek, m,{from, q, reply, sender}) => {
+try{
+    if(!q) return reply("🎶 Please give me song name or YouTube link!")
 
-    // get video info
-    const info = await ytdl.getInfo(q);
-    const title = info.videoDetails.title;
-    const views = info.videoDetails.viewCount;
-    const author = info.videoDetails.author.name;
-    const length = new Date(info.videoDetails.lengthSeconds * 1000).toISOString().substr(11, 8);
-    const thumb = info.videoDetails.thumbnails.pop().url;
+    // If user gave a YouTube link → download directly
+    if(q.includes("youtube.com") || q.includes("youtu.be")){
+        return downloadSong(q, conn, from, mek, reply)
+    }
 
-    // file path
-    const filePath = path.join(tempDir, `${Date.now()}.mp3`);
+    // Otherwise → search
+    let search = await yts(q)
+    if(!search.videos || !search.videos.length) return reply("❌ No results found!")
 
-    // download audio (low size → avoid timeout)
-    const stream = ytdl(q, { filter: 'audioonly', quality: 'lowestaudio' })
-      .pipe(fs.createWriteStream(filePath));
+    let results = search.videos.slice(0, 5) // top 5
+    let listText = "🎶 *Search Results:*\n\n"
+    results.forEach((v, i) => {
+        listText += `${i+1}. ${v.title} [${v.timestamp}]\n`
+    })
+    listText += `\n👉 Reply with a number (1-${results.length}) to download.`
 
-    stream.on("finish", async () => {
+    // Save results in cache
+    songSearchCache[from] = results
 
-      // caption like your style
-      const caption = `
- /)  /)  ~ ┏━━━━━━━━━━━━━━━━━┓
-( •-• )  ~ ♡ 𝐘𝐓 𝐒𝐎𝐍𝐆 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃 ♡
-/づづ ~ ┗━━━━━━━━━━━━━━━━━┛    
+    reply(listText)
 
-╭━━━━━━━━━●●►
-┢😊 𝐓𝐢𝐭𝐥𝐞: ${title}
-┢😉 𝐀𝐮𝐭𝐡𝐨𝐫: ${author}
-┢🥴 𝐓𝐢𝐦𝐞: ${length}
-┢😑 𝐕𝐢𝐞𝐰𝐬: ${views}
-╰━━━━━━━━●●►
-   » [𒆜 ßÄÐkï††¥ 𒆜] «
-  0:00 ─〇───── 0:47
-b ⇄   ◃◃   ⅠⅠ   ▹▹   ↻
-      `;
+}catch(e){
+    console.log(e)
+    reply(`${e}`)
+}
+})
 
-      // send thumbnail + caption
-      await conn.sendMessage(from, { image: { url: thumb }, caption: caption }, { quoted: mek });
+// Listen for replies
+cmd({
+    pattern: "reply",
+    dontAddCommandList: true
+}, async(conn, mek, m,{from, body, reply}) => {
+    if(!songSearchCache[from]) return
+    let choice = parseInt(body.trim())
+    if(isNaN(choice) || choice < 1 || choice > songSearchCache[from].length){
+        return reply("❌ Invalid choice! Reply with a valid number.")
+    }
 
-      // send mp3 as document (avoid fs.readFileSync to reduce memory)
-      await conn.sendMessage(from, {
-        document: { url: filePath },
-        mimetype: "audio/mpeg",
-        fileName: `${title}.mp3`,
-        caption: "Shashika"
-      }, { quoted: mek });
+    let video = songSearchCache[from][choice-1]
+    delete songSearchCache[from] // clear cache after selection
 
-      // delete temp file
-      fs.unlinkSync(filePath);
+    await downloadSong(video.url, conn, from, mek, reply)
+})
 
-      // react success
-      await conn.sendMessage(from, { react: { text: '✅', key: mek.key } });
-    });
+// Function to download song
+async function downloadSong(url, conn, from, mek, reply){
+    try{
+        let info = await ytdl.getInfo(url)
+        let title = info.videoDetails.title
+        let file = `./temp/${title}.mp3`
 
-  } catch (e) {
-    console.error(e);
-    await reply(`⚠️ Error: ${e.message}`);
+        reply(`⬇️ Downloading: *${title}*`)
+
+        ytdl(url, { filter: "audioonly", quality: "highestaudio" })
+            .pipe(fs.createWriteStream(file))
+            .on("finish", async () => {
+                await conn.sendMessage(from, { 
+                    audio: fs.readFileSync(file), 
+                    mimetype: "audio/mpeg", 
+                    fileName: `${title}.mp3` 
+                }, { quoted: mek })
+                fs.unlinkSync(file)
+            })
+    }catch(e){
+        console.log(e)
+        reply(`${e}`)
+    }
   }
-});
