@@ -13,9 +13,7 @@ cmd({
   desc: "Search and download YouTube songs",
   filename: __filename
 },
-async (conn, mek, m, {
-  from, q, reply
-}) => {
+async (conn, mek, m, { from, q, reply }) => {
   try {
     if (!q) return await reply("💡 Use: *.song despacito*");
 
@@ -35,6 +33,7 @@ async (conn, mek, m, {
 
     // save results in store
     searchStore[from] = {
+      step: "choose",
       key: sentMsg.key.id,
       results: videos
     };
@@ -50,46 +49,90 @@ cmd({
   on: "message"
 }, async (conn, mek, m, { from, body, reply }) => {
   try {
-    if (!m.quoted) return;
     let store = searchStore[from];
     if (!store) return;
-    if (m.quoted.id !== store.key) return;
+    if (!m.quoted) return;
+    if (m.quoted.key?.id !== store.key) return;
 
-    let choice = parseInt(m.body.trim());
-    if (isNaN(choice) || choice < 1 || choice > store.results.length) {
-      return await reply("❌ Invalid choice. Reply with 1–5.");
+    let text = body.trim();
+
+    // step 1: user chooses video
+    if (store.step === "choose") {
+      let choice = parseInt(text.replace(/[^0-9]/g, ""));
+      if (isNaN(choice) || choice < 1 || choice > store.results.length) {
+        return await reply("❌ Invalid choice. Reply with 1–5.");
+      }
+      store.video = store.results[choice - 1];
+      store.step = "format";
+
+      await reply(`📥 Selected: *${store.video.title}*\n\nChoose format:\n\n🎵 audio\n📄 document\n📝 lyrics`);
+      return;
     }
 
-    let video = store.results[choice - 1];
-    await reply(`⏳ Downloading *${video.title}*...`);
+    // step 2: user chooses format
+    if (store.step === "format") {
+      let video = store.video;
+      let format = text.toLowerCase();
 
-    // fetch download link
-    let res = await fetch(`https://dark-shan-yt.koyeb.app/download/ytmp3?url=${video.url}`);
-    let data = await res.json();
+      if (!["audio", "document", "lyrics"].includes(format)) {
+        return await reply("❌ Invalid format. Type: audio / document / lyrics");
+      }
 
-    if (!data.status) return await reply("❌ Failed to get download link.");
+      await reply(`⏳ Downloading *${video.title}* as ${format}...`);
 
-    let audio = data.data;
+      // fetch download link
+      let res = await fetch(`https://dark-shan-yt.koyeb.app/download/ytmp3?url=${video.url}`);
+      if (!res.ok) return await reply("⚠️ API request failed.");
+      let data = await res.json();
+      if (!data.status) return await reply("❌ Failed to get download link.");
 
-    // send details
-    await conn.sendMessage(from, {
-      image: { url: audio.thumbnail },
-      caption: `🎶 *${audio.title}*\n📥 Downloading MP3...`
-    }, { quoted: mek });
+      let audio = data.data;
 
-    // send audio file
-    await conn.sendMessage(from, {
-      document: { url: audio.download },
-      mimetype: 'audio/mp3',
-      fileName: `${audio.title}.mp3`
-    }, { quoted: mek });
+      // send preview
+      await conn.sendMessage(from, {
+        image: { url: audio.thumbnail },
+        caption: `🎶 *${audio.title}*`
+      }, { quoted: mek });
 
-    await conn.sendMessage(from, {
-      react: { text: '✅', key: mek.key }
-    });
+      if (format === "audio") {
+        await conn.sendMessage(from, {
+          audio: { url: audio.download },
+          mimetype: 'audio/mpeg',
+          fileName: `${audio.title}.mp3`,
+          ptt: false
+        }, { quoted: mek });
+      }
 
-    // clear store
-    delete searchStore[from];
+      if (format === "document") {
+        await conn.sendMessage(from, {
+          document: { url: audio.download },
+          mimetype: 'audio/mpeg',
+          fileName: `${audio.title}.mp3`
+        }, { quoted: mek });
+      }
+
+      if (format === "lyrics") {
+        // try to get lyrics (using video.title as query)
+        let lyricRes = await fetch(`https://dark-shan-yt.koyeb.app/lyrics?query=${encodeURIComponent(video.title)}`);
+        if (lyricRes.ok) {
+          let lyricData = await lyricRes.json();
+          if (lyricData.status && lyricData.data) {
+            await reply(`📖 *Lyrics for ${video.title}*\n\n${lyricData.data}`);
+          } else {
+            await reply("❌ Lyrics not found.");
+          }
+        } else {
+          await reply("⚠️ Lyrics API error.");
+        }
+      }
+
+      await conn.sendMessage(from, {
+        react: { text: '✅', key: mek.key }
+      });
+
+      // clear store
+      delete searchStore[from];
+    }
 
   } catch (e) {
     console.error(e);
