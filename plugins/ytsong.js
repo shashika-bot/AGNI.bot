@@ -1,6 +1,6 @@
 const { cmd, commands } = require("../command");
 const yts = require("yt-search");
-const { ytmp3 } = require("@vreden/youtube_scraper"); // fixed require
+const { ytmp3 } = require("@vreden/youtube_scraper");
 
 cmd(
   {
@@ -61,6 +61,10 @@ cmd(
       const quality = "128"; // Default quality
       const songData = await ytmp3(url, quality);
 
+      // Safe check for download URL
+      const audioUrl = songData?.download?.url || songData?.url;
+      if (!audioUrl) return reply("❌ Failed to get audio link!");
+
       // Validate song duration (limit: 30 minutes)
       let durationParts = data.timestamp.split(":").map(Number);
       let totalSeconds =
@@ -76,7 +80,7 @@ cmd(
       await robin.sendMessage(
         from,
         {
-          audio: { url: songData.download.url },
+          audio: { url: audioUrl },
           mimetype: "audio/mpeg",
         },
         { quoted: mek }
@@ -86,7 +90,7 @@ cmd(
       await robin.sendMessage(
         from,
         {
-          document: { url: songData.download.url },
+          document: { url: audioUrl },
           mimetype: "audio/mpeg",
           fileName: `${data.title}.mp3`,
           caption: "𝐌𝐚𝐝𝐞 𝐛𝐲 Shashika",
