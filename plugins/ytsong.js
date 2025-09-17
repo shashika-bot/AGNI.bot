@@ -1,6 +1,6 @@
 const { cmd, commands } = require("../command");
 const yts = require("yt-search");
-const { ytmp3 } = require("");
+const { ytmp3 } = require("@vreden/youtube_scraper"); // fixed require
 
 cmd(
   {
@@ -22,20 +22,6 @@ cmd(
       command,
       args,
       q,
-      isGroup,
-      sender,
-      senderNumber,
-      botNumber2,
-      botNumber,
-      pushname,
-      isMe,
-      isOwner,
-      groupMetadata,
-      groupName,
-      participants,
-      groupAdmins,
-      isBotAdmins,
-      isAdmins,
       reply,
     }
   ) => {
@@ -44,6 +30,9 @@ cmd(
 
       // Search for the video
       const search = await yts(q);
+      if (!search.videos.length)
+        return reply("❌ Video not found, try another query.");
+
       const data = search.videos[0];
       const url = data.url;
 
@@ -68,7 +57,7 @@ cmd(
         { quoted: mek }
       );
 
-      // Download the audio using @vreden/youtube_scraper
+      // Download the audio
       const quality = "128"; // Default quality
       const songData = await ytmp3(url, quality);
 
@@ -80,7 +69,7 @@ cmd(
           : durationParts[0] * 60 + durationParts[1];
 
       if (totalSeconds > 1800) {
-        return reply("⏱️ audio limit is 30 minitues");
+        return reply("⏱️ audio limit is 30 minutes");
       }
 
       // Send audio file
@@ -112,4 +101,3 @@ cmd(
     }
   }
 );
-      
