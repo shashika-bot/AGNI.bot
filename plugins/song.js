@@ -1,133 +1,98 @@
-const {cmd} = require('../command')
-const ytdl = require("ytdl-core")
-const yts = require("yt-search")
-const fs = require("fs")
+// plugins/song.js
+const { cmd } = require('../command');
+const yts = require('yt-search');
+const fetch = require('node-fetch');
 
-// Cache to keep search results per chat
-let songCache = {}
-let downloadCache = {}
+// search results store
+let searchStore = {};
 
 cmd({
-    pattern: "song",
-    desc: "Search and download songs.",
-    category: "download",
-    filename: __filename
+  pattern: "song",
+  category: "downloader",
+  react: "🎶",
+  desc: "Search and download YouTube songs",
+  filename: __filename
 },
-async(conn, mek, m,{from, q, reply}) => {
-try{
-    if(!q) return reply("🎶 Please give me a song name or YouTube link!")
+async (conn, mek, m, {
+  from, q, reply
+}) => {
+  try {
+    if (!q) return await reply("💡 Use: *.song despacito*");
 
-    // If YouTube link → direct download
-    if(q.includes("youtube.com") || q.includes("youtu.be")){
-        return askFormat(q, conn, from, mek, reply)
-    }
+    let search = await yts(q);
+    let videos = search.videos.slice(0, 5);
 
-    // Otherwise search
-    let search = await yts(q)
-    if(!search.videos || !search.videos.length) return reply("❌ No results found!")
+    if (videos.length === 0) return await reply("❌ No results found.");
 
-    let results = search.videos.slice(0, 5) // top 5
-    let listText = "🎶 *Search Results:*\n\n"
-    results.forEach((v, i) => {
-        listText += `${i+1}. ${v.title} [${v.timestamp}]\n`
-    })
-    listText += `\n👉 Reply with a number (1-${results.length}) to download.`
+    let msg = "🎶 *SEARCH RESULTS*\n\n";
+    videos.forEach((v, i) => {
+      msg += `${i + 1}. ${v.title}\n   ⏱ ${v.timestamp} | 👁 ${v.views}\n\n`;
+    });
+    msg += "_Reply with a number to download._";
 
-    // Save results in cache for this chat
-    songCache[from] = {
-        results,
-        key: mek.key // keep message key for reply check
-    }
+    // send search result message
+    let sentMsg = await conn.sendMessage(from, { text: msg }, { quoted: mek });
 
-    await conn.sendMessage(from, { text: listText }, { quoted: mek })
+    // save results in store
+    searchStore[from] = {
+      key: sentMsg.key.id,
+      results: videos
+    };
 
-}catch(e){
-    console.log(e)
-    reply(`${e}`)
-}
-})
+  } catch (e) {
+    console.error(e);
+    await reply("⚠️ Error: " + e.message);
+  }
+});
 
-// Reply handler (search results + format choice)
+// reply handler
 cmd({
-    pattern: ".*",
-    dontAddCommandList: true
-}, async(conn, mek, m,{from, body, reply}) => {
-    // ✅ Step 1: If replying to search results
-    if(songCache[from]){
-        let quoted = mek.message?.extendedTextMessage?.contextInfo
-        if(!quoted || quoted.stanzaId !== songCache[from].key.id) return
+  on: "message"
+}, async (conn, mek, m, { from, body, reply }) => {
+  try {
+    if (!m.quoted) return;
+    let store = searchStore[from];
+    if (!store) return;
+    if (m.quoted.id !== store.key) return;
 
-        let choice = parseInt(body.trim())
-        if(isNaN(choice)) return // not a number → ignore
-
-        let results = songCache[from].results
-        if(choice < 1 || choice > results.length){
-            return reply(`❌ Invalid choice. Reply with 1-${results.length}`)
-        }
-
-        let video = results[choice-1]
-        delete songCache[from] // clear after use
-
-        return askFormat(video.url, conn, from, mek, reply)
+    let choice = parseInt(m.body.trim());
+    if (isNaN(choice) || choice < 1 || choice > store.results.length) {
+      return await reply("❌ Invalid choice. Reply with 1–5.");
     }
 
-    // ✅ Step 2: If replying to format choice
-    if(downloadCache[from]){
-        let quoted = mek.message?.extendedTextMessage?.contextInfo
-        if(!quoted || quoted.stanzaId !== downloadCache[from].key.id) return
+    let video = store.results[choice - 1];
+    await reply(`⏳ Downloading *${video.title}*...`);
 
-        let choice = parseInt(body.trim())
-        if(isNaN(choice)) return
+    // fetch download link
+    let res = await fetch(`https://dark-shan-yt.koyeb.app/download/ytmp3?url=${video.url}`);
+    let data = await res.json();
 
-        let { url } = downloadCache[from]
-        delete downloadCache[from]
+    if (!data.status) return await reply("❌ Failed to get download link.");
 
-        if(choice === 1){
-            return downloadSong(url, conn, from, mek, reply, "audio")
-        } else if(choice === 2){
-            return downloadSong(url, conn, from, mek, reply, "document")
-        } else {
-            return reply("❌ Invalid choice. Reply with 1 (Audio) or 2 (Document)")
-        }
-    }
-})
+    let audio = data.data;
 
-// Function to ask format
-async function askFormat(url, conn, from, mek, reply){
-    let msg = "✅ Song found!\n\n👉 Reply with:\n1. 🎵 Send as Audio\n2. 📄 Send as Document"
-    downloadCache[from] = { url, key: mek.key }
-    await conn.sendMessage(from, { text: msg }, { quoted: mek })
-}
+    // send details
+    await conn.sendMessage(from, {
+      image: { url: audio.thumbnail },
+      caption: `🎶 *${audio.title}*\n📥 Downloading MP3...`
+    }, { quoted: mek });
 
-// Function to download a song
-async function downloadSong(url, conn, from, mek, reply, mode){
-    try{
-        let info = await ytdl.getInfo(url)
-        let title = info.videoDetails.title.replace(/[^\w\s]/gi, '')
-        let file = `./temp/${Date.now()}.mp3`
+    // send audio file
+    await conn.sendMessage(from, {
+      document: { url: audio.download },
+      mimetype: 'audio/mp3',
+      fileName: `${audio.title}.mp3`
+    }, { quoted: mek });
 
-        reply(`⬇️ Downloading: *${title}*`)
+    await conn.sendMessage(from, {
+      react: { text: '✅', key: mek.key }
+    });
 
-        ytdl(url, { filter: "audioonly", quality: "highestaudio" })
-            .pipe(fs.createWriteStream(file))
-            .on("finish", async () => {
-                if(mode === "audio"){
-                    await conn.sendMessage(from, { 
-                        audio: fs.readFileSync(file), 
-                        mimetype: "audio/mpeg", 
-                        fileName: `${title}.mp3` 
-                    }, { quoted: mek })
-                } else {
-                    await conn.sendMessage(from, { 
-                        document: fs.readFileSync(file), 
-                        mimetype: "audio/mpeg", 
-                        fileName: `${title}.mp3` 
-                    }, { quoted: mek })
-                }
-                fs.unlinkSync(file)
-            })
-    }catch(e){
-        console.log(e)
-        reply(`${e}`)
-    }
-}
+    // clear store
+    delete searchStore[from];
+
+  } catch (e) {
+    console.error(e);
+    await reply("⚠️ Error: " + e.message);
+  }
+});
