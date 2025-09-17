@@ -1,6 +1,8 @@
 const { cmd, commands } = require("../command");
 const yts = require("yt-search");
-const { ytmp3 } = require("@vreden/youtube_scraper");
+const ytdl = require("ytdl-core");
+const fs = require("fs");
+const path = require("path");
 
 cmd(
   {
@@ -10,21 +12,7 @@ cmd(
     category: "download",
     filename: __filename,
   },
-  async (
-    robin,
-    mek,
-    m,
-    {
-      from,
-      quoted,
-      body,
-      isCmd,
-      command,
-      args,
-      q,
-      reply,
-    }
-  ) => {
+  async (robin, mek, m, { from, quoted, q, reply }) => {
     try {
       if (!q) return reply("*නමක් හරි ලින්ක් එකක් හරි දෙන්න* 🌚❤️");
 
@@ -57,14 +45,6 @@ cmd(
         { quoted: mek }
       );
 
-      // Download the audio
-      const quality = "128"; // Default quality
-      const songData = await ytmp3(url, quality);
-
-      // Safe check for download URL
-      const audioUrl = songData?.download?.url || songData?.url;
-      if (!audioUrl) return reply("❌ Failed to get audio link!");
-
       // Validate song duration (limit: 30 minutes)
       let durationParts = data.timestamp.split(":").map(Number);
       let totalSeconds =
@@ -73,32 +53,43 @@ cmd(
           : durationParts[0] * 60 + durationParts[1];
 
       if (totalSeconds > 1800) {
-        return reply("⏱️ audio limit is 30 minutes");
+        return reply("⏱️ Audio limit is 30 minutes");
       }
 
-      // Send audio file
-      await robin.sendMessage(
-        from,
-        {
-          audio: { url: audioUrl },
-          mimetype: "audio/mpeg",
-        },
-        { quoted: mek }
-      );
+      // Download audio using ytdl-core
+      const tempFile = path.join(__dirname, `${data.title}.mp3`);
+      const stream = ytdl(url, { filter: "audioonly", quality: "highestaudio" });
 
-      // Send as a document (optional)
-      await robin.sendMessage(
-        from,
-        {
-          document: { url: audioUrl },
-          mimetype: "audio/mpeg",
-          fileName: `${data.title}.mp3`,
-          caption: "𝐌𝐚𝐝𝐞 𝐛𝐲 Shashika",
-        },
-        { quoted: mek }
-      );
+      stream.pipe(fs.createWriteStream(tempFile));
 
-      return reply("*Thanks for using my bot* 🌚❤️");
+      stream.on("end", async () => {
+        // Send audio file
+        await robin.sendMessage(
+          from,
+          { audio: fs.createReadStream(tempFile), mimetype: "audio/mpeg" },
+          { quoted: mek }
+        );
+
+        // Optional: send as document
+        await robin.sendMessage(
+          from,
+          {
+            document: fs.createReadStream(tempFile),
+            mimetype: "audio/mpeg",
+            fileName: `${data.title}.mp3`,
+            caption: "𝐌𝐚𝐝𝐞 𝐛𝐲 Shashika",
+          },
+          { quoted: mek }
+        );
+
+        // Delete temp file
+        fs.unlinkSync(tempFile);
+      });
+
+      stream.on("error", (err) => {
+        console.log(err);
+        reply("❌ Failed to download audio!");
+      });
     } catch (e) {
       console.log(e);
       reply(`❌ Error: ${e.message}`);
