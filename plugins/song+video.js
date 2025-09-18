@@ -34,9 +34,13 @@ b ⇄   ◃◃   ⅠⅠ   ▹▹   ↻
 
     await conn.sendMessage(from, { image: { url: data.thumbnail }, caption: desc }, { quoted: mek })
 
-    //download audio
+    // download audio
     let down = await fg.yta(url)
-    let downloadurl = down.dl_url
+    let downloadurl = down.dl_url || down.result || down.audio || down.url || null
+
+    if (!downloadurl) {
+        return reply("❌ Could not fetch audio download link!")
+    }
 
     await conn.sendMessage(from, { audio: { url: downloadurl }, mimetype: "audio/mpeg" }, { quoted: mek })
     await conn.sendMessage(from, { document: { url: downloadurl }, mimetype: "audio/mpeg", fileName: data.title + ".mp3", caption: " by agni bot " }, { quoted: mek })
@@ -80,9 +84,13 @@ b ⇄   ◃◃   ⅠⅠ   ▹▹   ↻
 
     await conn.sendMessage(from, { image: { url: data.thumbnail }, caption: desc }, { quoted: mek })
 
-    //download video
+    // download video
     let down = await fg.ytv(url)
-    let downloadurl = down.dl_url
+    let downloadurl = down.dl_url || down.result || down.video || down.url || null
+
+    if (!downloadurl) {
+        return reply("❌ Could not fetch video download link!")
+    }
 
     await conn.sendMessage(from, { video: { url: downloadurl }, mimetype: "video/mp4" }, { quoted: mek })
     await conn.sendMessage(from, { document: { url: downloadurl }, mimetype: "video/mp4", fileName: data.title + ".mp4", caption: " by agni bot" }, { quoted: mek })
